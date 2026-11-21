@@ -33,12 +33,13 @@ async def ingest_webhook(
     if not x_idempotency_key:
         raise HTTPException(status_code=400, detail="Missing X-Idempotency-Key header")
     
-    if not is_new:
-        return {"status": "duplicate"}
+  
     
     cleaned_text, fingerprint = await asyncio.to_thread(scrub_and_fingerprint, payload.content)
-    await save_event(payload.event_id, payload.tenant_id, cleaned_text, fingerprint)
-    downstream_res = await forward_event(payload.event_id, cleaned_text, fingerprint)
+    is_new = await save_event(x_idempotency_key,payload.event_id, payload.tenant_id, cleaned_text, fingerprint)
+    if not is_new:
+        return {"status": "duplicate"}
+    downstream_res = await forward_event(x_idempotency_key,payload.event_id, cleaned_text, fingerprint)
     await mark_delivered(payload.event_id)
 
     return {"status": "processed", "downstream": downstream_res}
