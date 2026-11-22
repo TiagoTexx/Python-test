@@ -8,17 +8,22 @@ PII_PATTERNS = [
 ]
 
 
-def scrub_and_fingerprint(raw_text: str, blob_iterations: int = 120_000) -> tuple[str, str]:
-    """
-    Redacts common PII patterns and computes a deterministic cryptographic fingerprint.
-    CPU-bound (~40-60ms per invocation depending on host CPU).
-    """
+def scrub(raw_text: str) -> str:
+    """Redige PII com regex. Custo desprezível, seguro para correr no event loop."""
     cleaned = raw_text
     for pattern in PII_PATTERNS:
         cleaned = pattern.sub("[REDACTED]", cleaned)
+    return cleaned
 
-    digest = cleaned.encode("utf-8")
-    for _ in range(blob_iterations):
-        digest = hashlib.sha256(digest).digest()
 
-    return cleaned, digest.hex()
+def fingerprint_of(cleaned: str, iterations: int = 120_000) -> str:
+    """CPU-bound: corre no executor. pbkdf2_hmac liberta o GIL."""
+    return hashlib.pbkdf2_hmac(
+        "sha256", cleaned.encode(), b"webhook-fingerprint", iterations
+    ).hex()
+
+
+def scrub_and_fingerprint(raw_text: str, blob_iterations: int = 120_000):
+    """Mantida por compatibilidade, caso algum teste a importe."""
+    cleaned = scrub(raw_text)
+    return cleaned, fingerprint_of(cleaned, blob_iterations)
