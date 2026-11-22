@@ -1,17 +1,14 @@
 import asyncio
-import os,ctypes
-import random
 from fastapi import FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor
 
 from app.database import init_db,close_db, save_event, mark_delivered
-from app.downstream import forward_event
+from app.downstream import forward_event, close_client
 from app.processor import scrub, fingerprint_of
 
 app = FastAPI(title="Webhook Ingestion Service")
-
-executor = ThreadPoolExecutor(max_workers=max(1, os.cpu_count()))
+executor = ThreadPoolExecutor(max_workers=4)
 
 #creates an hashmap to get faster to reject repetitive keys
 idempotency_cache: dict[str, str] = {}
@@ -22,23 +19,22 @@ class WebhookPayload(BaseModel):
     tenant_id: str
     content: str
 
-
-async def deliver_with_retry(event_id: str, cleaned_text: str, fingerprint: str) -> None:
-    for attempt in range(8):
+async def deliver_with_retry(event_id, cleaned_text, fingerprint) -> None:
+    for _ in range(8):
         try:
             await forward_event(event_id, cleaned_text, fingerprint)
             break
         except Exception:
-            await asyncio.sleep(min(0.05 * 2**attempt, 0.5) * (0.5 + random.random()))
+            await asyncio.sleep(0.03)
     else:
-        return  # fica 'pending'
+        return 
 
-    for attempt in range(5):
+    for _ in range(5):
         try:
             await mark_delivered(event_id, fingerprint)
             return
         except Exception:
-            await asyncio.sleep(0.05 * (attempt + 1))
+            await asyncio.sleep(0.03)
 
 async def process_and_deliver(event_id: str, cleaned_text: str) -> None:
     await asyncio.sleep(0.3)
@@ -49,20 +45,15 @@ async def process_and_deliver(event_id: str, cleaned_text: str) -> None:
 @app.on_event("startup")
 async def startup():
     await init_db()
-    if os.name == "nt":
-        k32 = ctypes.windll.kernel32
-        k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00008000)  # ABOVE_NORMAL
 
 @app.on_event("shutdown")
 async def shutdown():
+    await close_client()
     await close_db()    
  
-
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
 
 @app.post("/webhooks/ingest", status_code=status.HTTP_202_ACCEPTED)
 async def ingest_webhook(

@@ -18,3 +18,7 @@ async def forward_event(event_id: str, cleaned_text: str, fingerprint: str) -> d
     )
     response.raise_for_status()
     return response.json()
+
+    
+async def close_client() -> None:
+    await _client.aclose()
