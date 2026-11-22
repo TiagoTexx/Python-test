@@ -5,13 +5,14 @@ import asyncio
 DB_PATH = os.getenv("WEBHOOK_DB_PATH", "webhooks.db")
 _db: aiosqlite.Connection | None = None
 _db_write_lock = asyncio.Lock()
-_pending_commits = 0
-_commit_task: asyncio.Task | None = None
 
 async def init_db(db_path: str | None = None):
     global _db
     path = db_path or os.getenv("WEBHOOK_DB_PATH", DB_PATH)
     _db = await aiosqlite.connect(path)
+    await _db.execute("PRAGMA journal_mode=WAL;")
+    await _db.execute("PRAGMA synchronous=NORMAL;")
+    await _db.execute("PRAGMA busy_timeout=500;")
     await _db.execute("""
         CREATE TABLE IF NOT EXISTS events (
             idempotency_key TEXT NOT NULL UNIQUE,
@@ -29,23 +30,11 @@ async def init_db(db_path: str | None = None):
 
 
 async def close_db():
-    global _db, _pending_commits
+    global _db
     if _db is not None:
-        if _pending_commits > 0:
-            await _db.commit()
-            _pending_commits = 0
         await _db.close()
         _db = None
 
-
-async def _delayed_commit():
-    global _pending_commits, _commit_task
-    await asyncio.sleep(0.01)  # agrupa todas as escritas que chegarem numa janela de 10ms
-    async with _db_write_lock:
-        if _db is not None and _pending_commits > 0:
-            await _db.commit()
-            _pending_commits = 0
-        _commit_task = None
 
 async def save_event(idempotency_key, event_id, tenant_id, cleaned_text, fingerprint=None) -> bool:
     async with _db_write_lock:

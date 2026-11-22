@@ -17,13 +17,7 @@ def scrub(raw_text: str) -> str:
 
 
 def fingerprint_of(cleaned: str, iterations: int = 120_000) -> str:
-    """CPU-bound: corre no executor. pbkdf2_hmac liberta o GIL."""
+    """CPU-bound: runs on executor. pbkdf2_hmac frees GIL."""
     return hashlib.pbkdf2_hmac(
         "sha256", cleaned.encode(), b"webhook-fingerprint", iterations
     ).hex()
-
-
-def scrub_and_fingerprint(raw_text: str, blob_iterations: int = 120_000):
-    """Mantida por compatibilidade, caso algum teste a importe."""
-    cleaned = scrub(raw_text)
-    return cleaned, fingerprint_of(cleaned, blob_iterations)
